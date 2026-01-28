@@ -1,28 +1,26 @@
 import os
 from openai import OpenAI
 
-# Optional: Local LLM fallback
+# 1️⃣ OpenAI client helper
+def get_openai_client():
+    api_key = os.getenv("OPENAI_API_KEY")
+    if not api_key:
+        return None
+    return OpenAI(api_key=api_key)
+
+# 2️⃣ Optional Local LLM fallback
 try:
     from transformers import pipeline
     LOCAL_LLM_AVAILABLE = True
     local_generator = pipeline(
         "text-generation",
-        model="TheBloke/Llama-2-7B-Chat-GGML",  # You can choose another lightweight model
+        model="TheBloke/Llama-2-7B-Chat-GGML",  # lightweight local model
         max_length=300
     )
 except ImportError:
     LOCAL_LLM_AVAILABLE = False
 
-# OpenAI API setup
-api_key = os.getenv("OPENAI_API_KEY")
-if not api_key:
-    raise RuntimeError(
-        "OPENAI_API_KEY not found. Set it as an environment variable."
-    )
-
-client = OpenAI(api_key=api_key)
-
-# Keywords dictionary for dynamic mock generation
+# 3️⃣ Dynamic mock keywords dictionary
 KEYWORDS = {
     "cnn": {
         "missing": [
@@ -69,6 +67,7 @@ KEYWORDS = {
     }
 }
 
+# 4️⃣ Dynamic mock generator function
 def generate_dynamic_mock(topic, explanation):
     """
     Generate realistic feedback dynamically based on keywords in the topic/explanation.
@@ -87,7 +86,7 @@ def generate_dynamic_mock(topic, explanation):
         missing = "\n- ".join(data["missing"])
         incorrect = "\n- ".join(data["incorrect"])
         next_steps = "\n- ".join(data["next_steps"])
-        depth_score = 7 + len(data["missing"]) % 4  # Small variation
+        depth_score = 7 + len(data["missing"]) % 4  # small variation
     else:
         missing = "- Key foundational concepts missing"
         incorrect = "- Possible misconceptions"
@@ -107,35 +106,39 @@ Suggested Next Steps:
 - {next_steps}
 """
 
+# 5️⃣ Main function with OpenAI / Local LLM / Mock fallback
 def analyze_explanation(topic, explanation):
     """
-    Try OpenAI API first. If it fails, use dynamic mock.
-    If a local LLM is available, optionally use it for fallback.
+    Try OpenAI API first. If it fails, use local LLM if available.
+    Otherwise, fallback to dynamic mock.
     Fully seamless for user/demo.
     """
-    # 1️⃣ Try real OpenAI API
-    try:
-        response = client.chat.completions.create(
-            model="gpt-4o-mini",
-            messages=[
-                {"role": "system", "content": "You analyze conceptual understanding."},
-                {"role": "user", "content": f"Topic: {topic}\nExplanation: {explanation}"}
-            ],
-            max_tokens=300
-        )
-        return response.choices[0].message.content
+    # Try real OpenAI API
+    client = get_openai_client()
+    if client:
+        try:
+            response = client.chat.completions.create(
+                model="gpt-4o-mini",
+                messages=[
+                    {"role": "system", "content": "You analyze conceptual understanding."},
+                    {"role": "user", "content": f"Topic: {topic}\nExplanation: {explanation}"}
+                ],
+                max_tokens=300
+            )
+            return response.choices[0].message.content
+        except Exception:
+            pass  # fallback silently
 
-    except Exception:
-        # 2️⃣ Try Local LLM if available
-        if LOCAL_LLM_AVAILABLE:
-            try:
-                llm_output = local_generator(
-                    f"Analyze this student's explanation and provide missing concepts, incorrect understanding, depth score, and next steps:\nTopic: {topic}\nExplanation: {explanation}",
-                    max_length=300
-                )
-                return llm_output[0]['generated_text']
-            except Exception:
-                pass  # If local LLM fails, fallback to mock
+    # Try Local LLM if available
+    if LOCAL_LLM_AVAILABLE:
+        try:
+            llm_output = local_generator(
+                f"Analyze this student's explanation and provide missing concepts, incorrect understanding, depth score, and next steps:\nTopic: {topic}\nExplanation: {explanation}",
+                max_length=300
+            )
+            return llm_output[0]['generated_text']
+        except Exception:
+            pass  # fallback silently
 
-        # 3️⃣ Fallback to dynamic mock
-        return generate_dynamic_mock(topic, explanation)
+    # Always fallback to dynamic mock
+    return generate_dynamic_mock(topic, explanation)
